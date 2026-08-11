@@ -1,4 +1,5 @@
 import logging
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, status
@@ -48,11 +49,25 @@ async def llm_exception_handler(request: Request, exc: LLMServiceError):
 # Register API Router
 app.include_router(api_router)
 
-# Mount static files under /static
-app.mount("/static", StaticFiles(directory="app/static"), name="static")
+# Base static dir path
+STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
+
+# Explicit file routes for maximum compatibility
+@app.get("/styles.css")
+async def serve_styles_direct():
+    return FileResponse(os.path.join(STATIC_DIR, "styles.css"), media_type="text/css")
+
+
+@app.get("/app.js")
+async def serve_js_direct():
+    return FileResponse(os.path.join(STATIC_DIR, "app.js"), media_type="text/javascript")
+
+
+# Mount /static directory
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
 @app.get("/", response_class=FileResponse)
 async def serve_index():
     """Serve index.html at root route."""
-    return FileResponse("app/static/index.html")
+    return FileResponse(os.path.join(STATIC_DIR, "index.html"))
