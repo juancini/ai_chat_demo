@@ -1,4 +1,6 @@
+import os
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -25,6 +27,28 @@ class Settings(BaseSettings):
     OPENROUTER_MODEL: str = "meta-llama/llama-3.3-70b-instruct:free"
     OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"
     HTTP_TIMEOUT_SECONDS: float = 30.0
+
+    @field_validator("OPENROUTER_API_KEY", mode="before")
+    @classmethod
+    def clean_api_key(cls, v: str | None) -> str | None:
+        """Strip whitespace and treat empty strings or unset keys as None."""
+        if isinstance(v, str):
+            cleaned = v.strip()
+            if cleaned and not cleaned.startswith("#"):
+                return cleaned
+        # If env var was empty inside container, fallback to reading .env directly if present
+        if os.path.exists(".env"):
+            try:
+                with open(".env", encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if line.startswith("OPENROUTER_API_KEY="):
+                            val = line.split("=", 1)[1].strip()
+                            if val and not val.startswith("#"):
+                                return val
+            except Exception:
+                pass
+        return None
 
 
 settings = Settings()
