@@ -59,6 +59,7 @@ El sistema permite a los usuarios iniciar conversaciones, enviar mensajes a un M
 * **Tecnología:** HTML5, CSS3, JavaScript Vanilla (o HTMX).
 * **Estrategia de Entrega:** Servido directamente por FastAPI mediante `fastapi.staticfiles.StaticFiles`.
 * **Justificación:** Mantiene la arquitectura simple (KISS principle) evitando la necesidad de un contenedor adicional para Nginx/Apache.
+* **Calidad de presentación:** El parsing correcto del Markdown generado por el AI es crítico para la experiencia del usuario. Mensajes mal renderizados harán que el producto se perciba barato y poco profesional.
 
 ### 3.2. Backend (FastAPI Layer)
 * **Runtime:** Python 3.12 (o 3.13-slim).

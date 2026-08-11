@@ -367,14 +367,62 @@ document.addEventListener('DOMContentLoaded', () => {
   function formatMessageContent(content) {
     if (!content) return '';
     let escaped = escapeHtml(content);
-    
-    // Format code blocks ```code```
+
+    const codeBlocks = [];
     escaped = escaped.replace(/```([\s\S]*?)```/g, (match, code) => {
-      return `<pre><code>${code.trim()}</code></pre>`;
+      codeBlocks.push(code);
+      return `@@CODE_BLOCK_${codeBlocks.length - 1}@@`;
     });
 
-    // Format inline code `code`
-    escaped = escaped.replace(/`([^`]+)`/g, '<code>$1</code>');
+    const inlineCodes = [];
+    escaped = escaped.replace(/`([^`\n]+)`/g, (match, code) => {
+      inlineCodes.push(code);
+      return `@@INLINE_CODE_${inlineCodes.length - 1}@@`;
+    });
+
+    escaped = escaped.replace(/^(?:---|\*\*\*|___)\s*$/gm, '<hr>');
+    escaped = escaped.replace(/^######\s+(.+)$/gm, '<h6>$1</h6>');
+    escaped = escaped.replace(/^#####\s+(.+)$/gm, '<h5>$1</h5>');
+    escaped = escaped.replace(/^####\s+(.+)$/gm, '<h4>$1</h4>');
+    escaped = escaped.replace(/^###\s+(.+)$/gm, '<h3>$1</h3>');
+    escaped = escaped.replace(/^##\s+(.+)$/gm, '<h2>$1</h2>');
+    escaped = escaped.replace(/^#\s+(.+)$/gm, '<h1>$1</h1>');
+    escaped = escaped.replace(/^> ?(.+)$/gm, '<blockquote>$1</blockquote>');
+
+    escaped = escaped.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>');
+    escaped = escaped.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    escaped = escaped.replace(/\*(.+?)\*/g, '<em>$1</em>');
+
+    escaped = escaped.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+
+    escaped = escaped.replace(/^(\|?.+\|.*)\r?\n\|?\s*[:\-]+[:\s]*\|(?:\s*[:\-]+[:\s]*\|?)+\s*\r?\n(?:\|?.+\|.*(?:\r?\n|$))+/gm, (match) => {
+      const lines = match.trim().split(/\r?\n/);
+      if (lines.length < 2) return match;
+
+      const parseRow = (line) => line.trim().replace(/^\||\|$/g, '').split('|').map((cell) => cell.trim());
+      const headerCells = parseRow(lines[0]);
+      const bodyRows = lines.slice(2).map(parseRow).filter((row) => row.some((cell) => cell !== ''));
+
+      const thead = `<thead><tr>${headerCells.map((cell) => `<th>${cell}</th>`).join('')}</tr></thead>`;
+      const tbody = bodyRows.map((row) => `<tr>${row.map((cell) => `<td>${cell}</td>`).join('')}</tr>`).join('');
+      return `<div class="md-table-wrapper"><table>${thead}<tbody>${tbody}</tbody></table></div>`;
+    });
+
+    escaped = escaped.replace(/^(?:[-*+] .+(?:\n[-*+] .+)*)/gm, (match) => {
+      const items = match.trim().split('\n').map((line) => `<li>${line.replace(/^[-*+] /, '')}</li>`);
+      return `<ul>${items.join('')}</ul>`;
+    });
+
+    escaped = escaped.replace(/^(?:\d+\. .+(?:\n\d+\. .+)*)/gm, (match) => {
+      const items = match.trim().split('\n').map((line) => `<li>${line.replace(/^\d+\. /, '')}</li>`);
+      return `<ol>${items.join('')}</ol>`;
+    });
+
+    escaped = escaped.replace(/\n{2,}/g, '<br><br>');
+    escaped = escaped.replace(/\n/g, '<br>');
+
+    escaped = escaped.replace(/@@INLINE_CODE_(\d+)@@/g, (_, idx) => `<code>${inlineCodes[idx]}</code>`);
+    escaped = escaped.replace(/@@CODE_BLOCK_(\d+)@@/g, (_, idx) => `<pre><code>${codeBlocks[idx].trim()}</code></pre>`);
 
     return escaped;
   }
