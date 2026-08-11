@@ -24,7 +24,7 @@ class Settings(BaseSettings):
 
     # LLM & OpenRouter Settings
     OPENROUTER_API_KEY: str | None = None
-    OPENROUTER_MODEL: str = "meta-llama/llama-3.3-70b-instruct:free"
+    OPENROUTER_MODEL: str = "google/gemini-2.0-flash-lite-preview-02-05:free"
     OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"
     HTTP_TIMEOUT_SECONDS: float = 30.0
 
@@ -36,7 +36,6 @@ class Settings(BaseSettings):
             cleaned = v.strip()
             if cleaned and not cleaned.startswith("#"):
                 return cleaned
-        # If env var was empty inside container, fallback to reading .env directly if present
         if os.path.exists(".env"):
             try:
                 with open(".env", encoding="utf-8") as f:
