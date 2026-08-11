@@ -58,7 +58,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Auto resize textarea
     messageInput.addEventListener('input', () => {
       messageInput.style.height = 'auto';
-      messageInput.style.height = `${Math.min(messageInput.scrollHeight, 150)}px`;
+      messageInput.style.height = `${Math.min(messageInput.scrollHeight, 140)}px`;
     });
 
     // Suggestion cards
@@ -81,9 +81,9 @@ document.addEventListener('DOMContentLoaded', () => {
   async function checkSystemStatus() {
     try {
       const res = await fetch('/api/v1/system/status');
-      if (!res.ok) return;
+      if (!res.ok) throw new Error('Status failed');
       const data = await res.json();
-      
+
       const dot = providerBadgeEl.querySelector('.status-dot');
       if (data.has_api_key) {
         dot.classList.remove('mock');
@@ -94,6 +94,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     } catch (err) {
       console.warn('Could not check system status:', err);
+      providerTextEl.textContent = 'Engine Offline';
     }
   }
 
@@ -104,13 +105,13 @@ document.addEventListener('DOMContentLoaded', () => {
       const conversations = await res.json();
       renderConversationsList(conversations);
     } catch (err) {
-      conversationsListEl.innerHTML = `<div class="conv-meta" style="padding:10px; color:var(--danger-color)">Error loading history</div>`;
+      conversationsListEl.innerHTML = `<div class="conv-meta" style="padding:10px; text-align:center; color:var(--text-muted)">No saved conversations</div>`;
     }
   }
 
   function renderConversationsList(conversations) {
     if (!conversations || conversations.length === 0) {
-      conversationsListEl.innerHTML = `<div class="conv-meta" style="padding:10px; text-align:center;">No conversations yet</div>`;
+      conversationsListEl.innerHTML = `<div class="conv-meta" style="padding:10px; text-align:center; color:var(--text-muted)">No conversations yet</div>`;
       return;
     }
 
@@ -168,7 +169,7 @@ document.addEventListener('DOMContentLoaded', () => {
       .map((msg) => {
         const isUser = msg.role === 'user';
         const avatarClass = isUser ? 'avatar-user' : 'avatar-assistant';
-        const iconClass = isUser ? 'fa-user' : 'fa-robot';
+        const iconClass = isUser ? 'fa-user' : 'fa-cube';
         const rowClass = isUser ? 'user' : 'assistant';
         const formattedTime = new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
@@ -197,7 +198,6 @@ document.addEventListener('DOMContentLoaded', () => {
       messagesListEl.style.display = 'flex';
       messagesListEl.innerHTML = '';
 
-      // Optimistically append user message
       appendSingleMessage({ role: 'user', content: content, timestamp: new Date().toISOString() });
 
       try {
@@ -260,7 +260,7 @@ document.addEventListener('DOMContentLoaded', () => {
   function appendSingleMessage(msg) {
     const isUser = msg.role === 'user';
     const avatarClass = isUser ? 'avatar-user' : 'avatar-assistant';
-    const iconClass = isUser ? 'fa-user' : 'fa-robot';
+    const iconClass = isUser ? 'fa-user' : 'fa-cube';
     const rowClass = isUser ? 'user' : 'assistant';
     const formattedTime = new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
@@ -292,7 +292,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function resetToNewChat() {
     currentConversationId = null;
-    activeChatTitleEl.textContent = 'Select or start a conversation';
+    activeChatTitleEl.textContent = 'New Conversation';
     deleteChatBtn.style.display = 'none';
     messagesListEl.style.display = 'none';
     messagesListEl.innerHTML = '';
