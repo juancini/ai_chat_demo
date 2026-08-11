@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Chat Assistant — FastAPI & MongoDB</title>
+  <!-- Google Fonts & FontAwesome Icons -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Sidebar Navigation -->
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-header">
+        <div class="brand">
+          <div class="brand-icon"><i class="fa-solid fa-brain"></i></div>
+          <span class="brand-name">AI Assistant</span>
+        </div>
+        <button id="new-chat-btn" class="btn btn-primary btn-new-chat">
+          <i class="fa-solid fa-plus"></i> New Chat
+        </button>
+      </div>
+
+      <div class="conversations-wrapper">
+        <div class="section-title">Recent Conversations</div>
+        <div class="conversations-list" id="conversations-list">
+          <div class="loading-spinner"><i class="fa-solid fa-circle-notch fa-spin"></i> Loading...</div>
+        </div>
+      </div>
+
+      <div class="sidebar-footer">
+        <div class="provider-badge" id="provider-badge">
+          <span class="status-dot"></span>
+          <span id="provider-text">Checking status...</span>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main Chat Workspace -->
+    <main class="chat-workspace">
+      <!-- Top Navigation / Status Header -->
+      <header class="chat-header">
+        <div class="mobile-toggle" id="mobile-toggle">
+          <i class="fa-solid fa-bars"></i>
+        </div>
+        <div class="chat-title-container">
+          <h2 id="active-chat-title">Select or start a conversation</h2>
+          <span class="chat-subtitle" id="active-chat-subtitle">FastAPI + MongoDB Engine</span>
+        </div>
+        <div class="header-actions">
+          <button id="delete-chat-btn" class="btn btn-icon btn-danger" title="Delete conversation" style="display: none;">
+            <i class="fa-regular fa-trash-can"></i>
+          </button>
+        </div>
+      </header>
+
+      <!-- Messages Stream -->
+      <div class="messages-container" id="messages-container">
+        <!-- Welcome Screen (Default empty state) -->
+        <div class="welcome-screen" id="welcome-screen">
+          <div class="welcome-badge"><i class="fa-solid fa-sparkles"></i> AI Chatbot Demo</div>
+          <h1>How can I help you today?</h1>
+          <p>Powered by FastAPI, MongoDB Async Driver, and OpenRouter API (with Mock LLM fallback).</p>
+          
+          <div class="suggestion-grid">
+            <button class="suggestion-card" data-prompt="Explain how MongoDB indexing works in async Python.">
+              <i class="fa-solid fa-database"></i>
+              <span>Explain MongoDB async indexing</span>
+            </button>
+            <button class="suggestion-card" data-prompt="What are the main benefits of using FastAPI over Flask?">
+              <i class="fa-solid fa-bolt"></i>
+              <span>FastAPI vs Flask benefits</span>
+            </button>
+            <button class="suggestion-card" data-prompt="Write a Python function to filter prime numbers from a list.">
+              <i class="fa-solid fa-code"></i>
+              <span>Write Python code for prime numbers</span>
+            </button>
+            <button class="suggestion-card" data-prompt="Summarize the Strategy pattern in software architecture.">
+              <i class="fa-solid fa-layer-group"></i>
+              <span>Summarize Strategy Design Pattern</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="messages-list" id="messages-list" style="display: none;"></div>
+        
+        <!-- Typing indicator -->
+        <div class="typing-indicator" id="typing-indicator" style="display: none;">
+          <div class="avatar avatar-assistant"><i class="fa-solid fa-robot"></i></div>
+          <div class="typing-dots">
+            <span></span><span></span><span></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Chat Input Area -->
+      <footer class="chat-input-area">
+        <form class="input-form" id="chat-form">
+          <div class="input-wrapper">
+            <textarea 
+              id="message-input" 
+              placeholder="Type a message... (Press Enter to send, Shift+Enter for new line)" 
+              rows="1"
+              required
+            ></textarea>
+            <button type="submit" id="send-btn" class="btn btn-send" title="Send message">
+              <i class="fa-solid fa-paper-plane"></i>
+            </button>
+          </div>
+        </form>
+        <div class="input-disclaimer">
+          Conversations are automatically persisted in MongoDB across Docker restarts.
+        </div>
+      </footer>
+    </main>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
