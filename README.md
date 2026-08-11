@@ -75,7 +75,7 @@ Abre tu navegador e ingresa a:
 * **Sistema de Autenticación de Usuarios (JWT / OAuth2)**:
   * *Razón*: Para un Code Challenge, agregar autenticación añade fricción innecesaria al evaluador para probar la app. La app está centrada en la interacción conversacional y persistencia.
 * **RAG / Vector Databases (ChromaDB / Pinecone)**:
-  * *Razón*: Priorizamos el principio KISS ("Preferimos algo chico, prolijo y bien pensado antes que algo grande y a medio terminar").
+  * *Razón*: Priorizamos el principio [KISS](https://en.wikipedia.org/wiki/KISS_principle) :"Preferimos algo chico, prolijo y bien pensado antes que algo grande y a medio terminar".
 
 ### 3. ¿Qué habría hecho distinto con más tiempo?
 * **Streaming de respuestas vía Server-Sent Events (SSE) o WebSockets**: En lugar de esperar el bloque completo del LLM, enviar tokens en tiempo real al frontend para mejorar la percepción de velocidad.
