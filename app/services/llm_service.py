@@ -1,5 +1,8 @@
 import abc
+import asyncio
+import json
 import logging
+from collections.abc import AsyncGenerator
 
 import httpx
 
@@ -20,11 +23,14 @@ class BaseLLMService(abc.ABC):
     async def generate_response(
         self, messages: list[dict[str, str]]
     ) -> tuple[str, str, str]:
-        """Generate response given a list of messages.
+        """Generate full response given a list of messages."""
+        pass
 
-        Returns:
-            tuple[content, provider_name, model_name]
-        """
+    @abc.abstractmethod
+    async def generate_response_stream(
+        self, messages: list[dict[str, str]]
+    ) -> AsyncGenerator[str, None]:
+        """Stream response tokens chunk by chunk."""
         pass
 
     @abc.abstractmethod
@@ -91,6 +97,58 @@ class OpenRouterLLMService(BaseLLMService):
             logger.error("Network error communicating with OpenRouter: %s", e)
             raise LLMServiceError(f"Network error connecting to OpenRouter: {e}") from e
 
+    async def generate_response_stream(
+        self, messages: list[dict[str, str]]
+    ) -> AsyncGenerator[str, None]:
+        url = f"{self.base_url}/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://github.com/juancini/ai_chat_demo",
+            "X-Title": "AI Chat Demo",
+        }
+        payload = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": 0.7,
+            "max_tokens": 1000,
+            "stream": True,
+        }
+
+        try:
+            async with httpx.AsyncClient(timeout=settings.HTTP_TIMEOUT_SECONDS) as client:
+                async with client.stream("POST", url, headers=headers, json=payload) as response:
+                    if response.status_code == 401:
+                        raise LLMServiceError("Invalid or unauthorized OpenRouter API Key.")
+
+                    if response.status_code != 200:
+                        body = await response.aread()
+                        err_msg = body.decode()
+                        raise LLMServiceError(
+                            f"OpenRouter streaming error (HTTP {response.status_code}): {err_msg}"
+                        )
+
+                    async for line in response.aiter_lines():
+                        line = line.strip()
+                        if not line or line.startswith(":"):
+                            continue
+                        if line.startswith("data: "):
+                            data_str = line[6:]
+                            if data_str == "[DONE]":
+                                break
+                            try:
+                                data = json.loads(data_str)
+                                delta = data.get("choices", [{}])[0].get("delta", {})
+                                content_chunk = delta.get("content", "")
+                                if content_chunk:
+                                    yield content_chunk
+                            except json.JSONDecodeError:
+                                continue
+        except httpx.TimeoutException as e:
+            raise LLMServiceError("OpenRouter streaming timed out.") from e
+        except httpx.RequestError as e:
+            raise LLMServiceError(f"Network error during OpenRouter stream: {e}") from e
+
     async def generate_title(self, prompt: str) -> str:
         messages = [
             {
@@ -112,7 +170,7 @@ class OpenRouterLLMService(BaseLLMService):
 
 
 class MockLLMService(BaseLLMService):
-    """Fallback Mock LLM Service when no API key is provided or for offline demo mode."""
+    """Fallback Mock LLM Service with simulated token streaming."""
 
     def __init__(self):
         self.model = "mock-demo-v1"
@@ -135,6 +193,16 @@ class MockLLMService(BaseLLMService):
             f"Set a valid OPENROUTER_API_KEY in your .env file to enable live AI responses.*"
         )
         return response_content, "mock", self.model
+
+    async def generate_response_stream(
+        self, messages: list[dict[str, str]]
+    ) -> AsyncGenerator[str, None]:
+        full_content, _, _ = await self.generate_response(messages)
+        words = full_content.split(" ")
+        for i, word in enumerate(words):
+            chunk = word + (" " if i < len(words) - 1 else "")
+            yield chunk
+            await asyncio.sleep(0.03)
 
     async def generate_title(self, prompt: str) -> str:
         clean_prompt = prompt.strip()

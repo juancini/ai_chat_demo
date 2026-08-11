@@ -28,10 +28,8 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function setupEventListeners() {
-    // New chat button
     newChatBtn.addEventListener('click', () => resetToNewChat());
 
-    // Delete chat button
     deleteChatBtn.addEventListener('click', async () => {
       if (!currentConversationId) return;
       if (confirm('Are you sure you want to delete this conversation?')) {
@@ -39,7 +37,6 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
 
-    // Chat form submit
     chatForm.addEventListener('submit', async (e) => {
       e.preventDefault();
       const content = messageInput.value.trim();
@@ -47,7 +44,6 @@ document.addEventListener('DOMContentLoaded', () => {
       await handleSendMessage(content);
     });
 
-    // Enter key submits (Shift+Enter for newline)
     messageInput.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
@@ -55,13 +51,11 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
 
-    // Auto resize textarea
     messageInput.addEventListener('input', () => {
       messageInput.style.height = 'auto';
       messageInput.style.height = `${Math.min(messageInput.scrollHeight, 140)}px`;
     });
 
-    // Suggestion cards
     document.querySelectorAll('.suggestion-card').forEach((card) => {
       card.addEventListener('click', () => {
         const prompt = card.dataset.prompt;
@@ -72,7 +66,6 @@ document.addEventListener('DOMContentLoaded', () => {
       });
     });
 
-    // Mobile menu toggle
     mobileToggleBtn.addEventListener('click', () => {
       sidebarEl.classList.toggle('open');
     });
@@ -130,7 +123,6 @@ document.addEventListener('DOMContentLoaded', () => {
       })
       .join('');
 
-    // Attach click handlers
     conversationsListEl.querySelectorAll('.conv-item').forEach((item) => {
       item.addEventListener('click', () => {
         const id = item.dataset.id;
@@ -191,69 +183,112 @@ document.addEventListener('DOMContentLoaded', () => {
     messageInput.value = '';
     messageInput.style.height = 'auto';
 
+    welcomeScreenEl.style.display = 'none';
+    messagesListEl.style.display = 'flex';
+
+    // 1. Create conversation first if not active
     if (!currentConversationId) {
-      // 1. Create new conversation thread with initial message
-      showTypingIndicator();
-      welcomeScreenEl.style.display = 'none';
-      messagesListEl.style.display = 'flex';
-      messagesListEl.innerHTML = '';
-
-      appendSingleMessage({ role: 'user', content: content, timestamp: new Date().toISOString() });
-
       try {
         const res = await fetch('/api/v1/conversations', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ initial_message: content }),
+          body: JSON.stringify({ title: 'New Conversation' }),
         });
 
-        if (!res.ok) throw new Error('Failed to start conversation');
+        if (!res.ok) throw new Error('Failed to create conversation thread');
         const detail = await res.json();
 
         currentConversationId = detail.id;
         activeChatTitleEl.textContent = detail.title;
         deleteChatBtn.style.display = 'inline-flex';
-
-        renderMessages(detail.messages || []);
         await loadConversations();
       } catch (err) {
-        alert('Error starting conversation: ' + err.message);
-      } finally {
-        hideTypingIndicator();
-        scrollToBottom();
+        alert('Error initializing chat thread: ' + err.message);
+        return;
       }
-    } else {
-      // 2. Append message to existing conversation thread
-      appendSingleMessage({ role: 'user', content: content, timestamp: new Date().toISOString() });
-      showTypingIndicator();
-      scrollToBottom();
+    }
 
-      try {
-        const res = await fetch(`/api/v1/conversations/${currentConversationId}/messages`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ content: content }),
-        });
+    // 2. Append User Message to UI
+    appendSingleMessage({ role: 'user', content: content, timestamp: new Date().toISOString() });
 
-        if (!res.ok) {
-          const errData = await res.json();
-          throw new Error(errData.detail || 'Failed to send message');
+    // 3. Create placeholder for Assistant Response
+    const asstBubbleId = `asst-bubble-${Date.now()}`;
+    const asstMsgHtml = `
+      <div class="message-row assistant">
+        <div class="avatar avatar-assistant"><i class="fa-solid fa-cube"></i></div>
+        <div class="message-wrapper">
+          <div class="message-bubble" id="${asstBubbleId}"></div>
+          <div class="message-time">${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
+        </div>
+      </div>
+    `;
+    messagesListEl.insertAdjacentHTML('beforeend', asstMsgHtml);
+    const asstBubbleEl = document.getElementById(asstBubbleId);
+
+    showTypingIndicator();
+    scrollToBottom();
+
+    // 4. Stream response via SSE
+    let accumulatedText = '';
+    try {
+      const response = await fetch(`/api/v1/conversations/${currentConversationId}/messages/stream`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: content }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Streaming failed with status ${response.status}`);
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n\n');
+        buffer = lines.pop(); // Keep incomplete line chunk in buffer
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try {
+              const data = JSON.parse(line.replace('data: ', ''));
+              if (data.error) {
+                accumulatedText += `\n⚠️ Error: ${data.error}`;
+                asstBubbleEl.innerHTML = formatMessageContent(accumulatedText);
+                break;
+              }
+
+              if (data.content) {
+                hideTypingIndicator();
+                accumulatedText += data.content;
+                asstBubbleEl.innerHTML = formatMessageContent(accumulatedText);
+                scrollToBottom();
+              }
+
+              if (data.done) {
+                hideTypingIndicator();
+                if (data.title) {
+                  activeChatTitleEl.textContent = data.title;
+                }
+                await loadConversations();
+              }
+            } catch (e) {
+              console.warn('Failed to parse SSE payload:', e);
+            }
+          }
         }
-
-        const data = await res.json();
-        hideTypingIndicator();
-        appendSingleMessage(data.assistant_message);
-        await loadConversations();
-      } catch (err) {
-        hideTypingIndicator();
-        appendSingleMessage({
-          role: 'assistant',
-          content: `⚠️ Error generating response: ${err.message}`,
-          timestamp: new Date().toISOString(),
-        });
-      } finally {
-        scrollToBottom();
       }
+    } catch (err) {
+      hideTypingIndicator();
+      asstBubbleEl.innerHTML = formatMessageContent(`⚠️ Connection error: ${err.message}`);
+    } finally {
+      hideTypingIndicator();
+      scrollToBottom();
     }
   }
 

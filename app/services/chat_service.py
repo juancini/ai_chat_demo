@@ -1,4 +1,6 @@
+import json
 import logging
+from collections.abc import AsyncGenerator
 from datetime import datetime
 from typing import Any
 
@@ -210,6 +212,75 @@ class ChatService:
             llm_provider=provider,
             model_used=model_used,
         )
+
+    async def send_message_stream(
+        self, conv_id: str, user_content: str
+    ) -> AsyncGenerator[str, None]:
+        """Stream LLM tokens using Server-Sent Events (SSE) while saving response to DB."""
+        if not ObjectId.is_valid(conv_id):
+            yield f"data: {json.dumps({'error': f'Invalid ID format: {conv_id}'})}\n\n"
+            return
+
+        conv_doc = await self.conversations_col.find_one({"_id": ObjectId(conv_id)})
+        if not conv_doc:
+            yield f"data: {json.dumps({'error': f'Conversation {conv_id} not found'})}\n\n"
+            return
+
+        now = datetime.utcnow()
+
+        user_msg_doc = {
+            "conversation_id": conv_id,
+            "role": Role.USER.value,
+            "content": user_content.strip(),
+            "timestamp": now,
+        }
+        await self.messages_col.insert_one(user_msg_doc)
+
+        cursor = self.messages_col.find({"conversation_id": conv_id}).sort("timestamp", 1)
+        history_docs = await cursor.to_list(length=100)
+        llm_messages = [
+            {"role": doc["role"], "content": doc["content"]} for doc in history_docs
+        ]
+
+        accumulated_content = []
+        try:
+            async for chunk in self.llm_service.generate_response_stream(llm_messages):
+                accumulated_content.append(chunk)
+                yield f"data: {json.dumps({'content': chunk, 'done': False})}\n\n"
+        except Exception as e:
+            logger.error("LLM streaming failed for conv %s: %s", conv_id, e)
+            yield f"data: {json.dumps({'error': str(e), 'done': True})}\n\n"
+            return
+
+        full_response = "".join(accumulated_content)
+
+        asst_now = datetime.utcnow()
+        asst_msg_doc = {
+            "conversation_id": conv_id,
+            "role": Role.ASSISTANT.value,
+            "content": full_response,
+            "timestamp": asst_now,
+        }
+        asst_res = await self.messages_col.insert_one(asst_msg_doc)
+        asst_id = str(asst_res.inserted_id)
+
+        update_fields: dict[str, Any] = {"updated_at": asst_now}
+        if conv_doc.get("title") in ("New Conversation", "Untitled Conversation"):
+            auto_title = await self.llm_service.generate_title(user_content)
+            update_fields["title"] = auto_title
+
+        await self.conversations_col.update_one(
+            {"_id": ObjectId(conv_id)}, {"$set": update_fields}
+        )
+
+        done_payload = {
+            "content": "",
+            "done": True,
+            "message_id": asst_id,
+            "conversation_id": conv_id,
+            "title": update_fields.get("title"),
+        }
+        yield f"data: {json.dumps(done_payload)}\n\n"
 
     async def delete_conversation(self, conv_id: str) -> bool:
         """Delete conversation and all its messages."""
