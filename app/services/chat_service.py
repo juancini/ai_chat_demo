@@ -21,22 +21,38 @@ logger = logging.getLogger(__name__)
 
 
 class ChatService:
+    @staticmethod
+    def _is_default_title(title: str | None) -> bool:
+        if not title:
+            return True
+        normalized = title.strip().lower()
+        return normalized in {"", "new conversation", "untitled conversation"}
+
+    async def _maybe_update_conversation_title(
+        self, conv_id: str, user_content: str, conv_doc: dict[str, Any]
+    ) -> dict[str, Any]:
+        update_fields: dict[str, Any] = {}
+        if self._is_default_title(conv_doc.get("title")):
+            try:
+                auto_title = await self.llm_service.generate_title(user_content)
+            except Exception as exc:
+                logger.warning("Failed to generate AI title for conversation %s: %s", conv_id, exc)
+                auto_title = user_content[:40].strip() + ("..." if len(user_content) > 40 else "")
+
+            if auto_title and auto_title.strip():
+                update_fields["title"] = auto_title.strip()
+
+        return update_fields
+
     def __init__(self, db: AsyncIOMotorDatabase, llm_service: BaseLLMService | None = None):
         self.db = db
         self.conversations_col = db.get_collection("conversations")
         self.messages_col = db.get_collection("messages")
         self.llm_service = llm_service or get_llm_service()
 
-    async def list_conversations(
-        self, limit: int = 50, skip: int = 0
-    ) -> list[ConversationSchema]:
+    async def list_conversations(self, limit: int = 50, skip: int = 0) -> list[ConversationSchema]:
         """List all conversations ordered by updated_at descending."""
-        cursor = (
-            self.conversations_col.find()
-            .sort("updated_at", -1)
-            .skip(skip)
-            .limit(limit)
-        )
+        cursor = self.conversations_col.find().sort("updated_at", -1).skip(skip).limit(limit)
         conversations = []
         async for doc in cursor:
             conv_id = str(doc["_id"])
@@ -163,16 +179,22 @@ class ChatService:
         cursor = self.messages_col.find({"conversation_id": conv_id}).sort("timestamp", 1)
         history_docs = await cursor.to_list(length=100)
 
-        llm_messages = [
-            {"role": doc["role"], "content": doc["content"]} for doc in history_docs
-        ]
+        llm_messages = [{"role": doc["role"], "content": doc["content"]} for doc in history_docs]
+
+        title_update_fields = await self._maybe_update_conversation_title(
+            conv_id, user_content, conv_doc
+        )
 
         try:
-            assistant_content, provider, model_used = (
-                await self.llm_service.generate_response(llm_messages)
+            assistant_content, provider, model_used = await self.llm_service.generate_response(
+                llm_messages
             )
         except Exception as e:
             logger.error("LLM generation failed for conversation %s: %s", conv_id, e)
+            if title_update_fields:
+                await self.conversations_col.update_one(
+                    {"_id": ObjectId(conv_id)}, {"$set": {"updated_at": now, **title_update_fields}}
+                )
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail=f"LLM Service Error: {str(e)}",
@@ -196,14 +218,11 @@ class ChatService:
             timestamp=asst_now,
         )
 
-        update_fields: dict[str, Any] = {"updated_at": asst_now}
-        if conv_doc.get("title") in ("New Conversation", "Untitled Conversation"):
-            auto_title = await self.llm_service.generate_title(user_content)
-            update_fields["title"] = auto_title
-
-        await self.conversations_col.update_one(
-            {"_id": ObjectId(conv_id)}, {"$set": update_fields}
-        )
+        update_fields: dict[str, Any] = {"updated_at": asst_now, **title_update_fields}
+        if update_fields:
+            await self.conversations_col.update_one(
+                {"_id": ObjectId(conv_id)}, {"$set": update_fields}
+            )
 
         return ChatResponseSchema(
             user_message=user_message_schema,
@@ -238,17 +257,22 @@ class ChatService:
 
         cursor = self.messages_col.find({"conversation_id": conv_id}).sort("timestamp", 1)
         history_docs = await cursor.to_list(length=100)
-        llm_messages = [
-            {"role": doc["role"], "content": doc["content"]} for doc in history_docs
-        ]
+        llm_messages = [{"role": doc["role"], "content": doc["content"]} for doc in history_docs]
 
         accumulated_content = []
+        title_update_fields = await self._maybe_update_conversation_title(
+            conv_id, user_content, conv_doc
+        )
         try:
             async for chunk in self.llm_service.generate_response_stream(llm_messages):
                 accumulated_content.append(chunk)
                 yield f"data: {json.dumps({'content': chunk, 'done': False})}\n\n"
         except Exception as e:
             logger.error("LLM streaming failed for conv %s: %s", conv_id, e)
+            if title_update_fields:
+                await self.conversations_col.update_one(
+                    {"_id": ObjectId(conv_id)}, {"$set": {"updated_at": now, **title_update_fields}}
+                )
             yield f"data: {json.dumps({'error': str(e), 'done': True})}\n\n"
             return
 
@@ -264,14 +288,11 @@ class ChatService:
         asst_res = await self.messages_col.insert_one(asst_msg_doc)
         asst_id = str(asst_res.inserted_id)
 
-        update_fields: dict[str, Any] = {"updated_at": asst_now}
-        if conv_doc.get("title") in ("New Conversation", "Untitled Conversation"):
-            auto_title = await self.llm_service.generate_title(user_content)
-            update_fields["title"] = auto_title
-
-        await self.conversations_col.update_one(
-            {"_id": ObjectId(conv_id)}, {"$set": update_fields}
-        )
+        update_fields: dict[str, Any] = {"updated_at": asst_now, **title_update_fields}
+        if update_fields:
+            await self.conversations_col.update_one(
+                {"_id": ObjectId(conv_id)}, {"$set": update_fields}
+            )
 
         done_payload = {
             "content": "",

@@ -117,6 +117,7 @@ Representa un mensaje individual dentro de una conversación.
 | **Driver de Mongo** | Motor (Async) | PyMongo (Sync) | PyMongo bloquea el Event Loop de FastAPI, degradando drásticamente el throughput. |
 | **Servido de Frontend** | Servido por FastAPI | Contenedor Nginx independiente | Reduce la complejidad de `docker-compose.yml` de 3 a 2 contenedores sin perder funcionalidad. |
 | **Resiliencia API Key** | Strategy Pattern (Mock LLM) | Lanza excepción en startup | Garantiza que `docker compose up` funcione *out-of-the-box* sin credenciales obligatorias. |
+| **Health-check endpoint** | `db.command("ping")` en `/system/status` | No hay verificación de DB en el estado de salud | Permite exponer un estado de servicio fiable y devolver `503` cuando MongoDB no está disponible. |
 | **CI / CD & SCA** | GitHub Actions + Ruff + Pytest | Ejecución manual local | GitHub Actions ofrece ejecuciones gratuitas ilimitadas para repos públicos. Mantiene altos estándares de calidad. |
 
 ---

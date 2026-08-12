@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
@@ -45,8 +45,16 @@ async def send_message_stream(
 
 
 @router.get("/system/status", response_model=SystemStatusSchema)
-async def get_system_status():
+async def get_system_status(db: AsyncIOMotorDatabase = Depends(get_database)):
     """Check application system status, LLM mode, and API key configuration."""
+    try:
+        await db.command("ping")
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Database health check failed: {exc}",
+        )
+
     has_key = bool(settings.OPENROUTER_API_KEY and settings.OPENROUTER_API_KEY.strip())
     provider = "openrouter" if has_key else "mock"
     return SystemStatusSchema(
