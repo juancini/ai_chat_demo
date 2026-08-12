@@ -75,11 +75,22 @@ El sistema permite a los usuarios iniciar conversaciones, enviar mensajes a un M
   * Si la variable de entorno `OPENROUTER_API_KEY` no está configurada, el sistema instanciará dinámicamente un `MockLLMService`.
   * **Beneficio:** Evita que la aplicación explote al iniciar (`docker compose up`) sin la clave, ofreciendo una experiencia en modo demo fluida para el evaluador.
 
-### 3.4. Persistencia (MongoDB)
-* **Driver:** `Motor` (Driver oficial asíncrono de MongoDB para Python) o `Beanie` (ODM asíncrono sobre Pydantic).
+### 3.4. Persistencia (MongoDB) & Optimización de BD
+* **Driver:** `Motor` (Driver oficial asíncrono de MongoDB para Python).
 * **Garantía:** Conexiones no bloqueantes que preservan el Event Loop de FastAPI.
+* **Indexación Compuesta (Detalle Crucial):**
+  * `db.messages.create_index([("conversation_id", 1), ("timestamp", 1)])`
+  * **Razón**: A medida que la cantidad de mensajes crece en la base de datos, consultar el historial de un chat (`.find({"conversation_id": conv_id}).sort("timestamp", 1)`) sin un índice compuesto requeriría un escaneo completo de colección ($O(N)$) y una etapa de ordenamiento en memoria (que falla en MongoDB si supera 32 MB). Con el índice compuesto, MongoDB realiza una búsqueda B-Tree instantánea ($O(\log N)$) recuperando los mensajes ya ordenados cronológicamente sin consumo adicional de CPU/RAM.
 
-### 3.5. Observabilidad y Métricas (Prometheus)
+### 3.5. Arquitectura Stateless & Escalabilidad Horizontal
+* **Cero Estado en Memoria**: El backend FastAPI es 100% *stateless*. Toda la sesión, historial conversacional y contexto reside de manera segura en MongoDB.
+* **Escalabilidad Horizontal**: Se puede escalar el backend en múltiples réplicas (`docker compose up --scale backend=3`) detrás de cualquier balanceador de carga sin necesidad de *sticky sessions* ni sincronización de memoria entre nodos.
+
+### 3.6. Streaming de Respuestas (SSE) & UX
+* **FastAPI `StreamingResponse` con Server-Sent Events (`text/event-stream`)**: Los tokens del LLM se transmiten al cliente en tiempo real a medida que son entregados por OpenRouter (o el Mock Service).
+* **Mejora Percibida de Latencia**: Reduce drásticamente el *Time To First Token* (TTFT), proporcionando feedback visual inmediato al usuario en lugar de bloquear la UI esperando la respuesta completa.
+
+### 3.7. Observabilidad y Métricas (Prometheus)
 * **Biblioteca:** `prometheus_client`.
 * **Endpoint de Scraping:** GET `/metrics` en formato OpenMetrics/Prometheus.
 * **Métricas Recolectadas:**
@@ -113,7 +124,7 @@ Representa un mensaje individual dentro de una conversación.
   "timestamp": "ISODate(...)"
 }
 ```
-* **Índices:** Índice compuesto en `{ conversation_id: 1, timestamp: 1 }` para acelerar el recuperado del historial en orden cronológico.
+* **Índice Compuesto Obligatorio:** `{ conversation_id: 1, timestamp: 1 }` para garantizar lecturas en $O(\log N)$ del historial ordenado cronológicamente.
 
 ---
 
@@ -123,6 +134,9 @@ Representa un mensaje individual dentro de una conversación.
 | :--- | :--- | :--- | :--- |
 | **Versión de Python** | Python 3.12 / 3.13 | Python 3.14 | 3.14 es muy reciente/experimental; no todos los paquetes tienen wheels C precompiladas para Linux/Docker. |
 | **Driver de Mongo** | Motor (Async) | PyMongo (Sync) | PyMongo bloquea el Event Loop de FastAPI, degradando drásticamente el throughput. |
+| **Indexación en BD** | Índice Compuesto `{ conversation_id: 1, timestamp: 1 }` | Sin índice o índices simples separados | Evita escaneos de colección $O(N)$ y ordenamientos en memoria cuando el volumen de mensajes crece. |
+| **Backend Stateless** | 100% Stateless (Datos en Mongo) | Estado de chat en memoria (dict/session) | Permite escalar horizontalmente (`docker compose up --scale backend=3`) sin romper sesiones de usuario. |
+| **Streaming SSE** | Server-Sent Events (`StreamingResponse`) | Polling o Responses Sincrónicas Bloqueantes | Reduce el Time To First Token (TTFT) y mejora drásticamente la velocidad percibida. |
 | **Servido de Frontend** | Servido por FastAPI | Contenedor Nginx independiente | Reduce la complejidad de `docker-compose.yml` de 3 a 2 contenedores sin perder funcionalidad. |
 | **Resiliencia API Key** | Strategy Pattern (Mock LLM) | Lanza excepción en startup | Garantiza que `docker compose up` funcione *out-of-the-box* sin credenciales obligatorias. |
 | **Métricas y Observabilidad** | Prometheus + `prometheus_client` (`/metrics`) | APM SaaS (ej: Datadog, New Relic) | Se agregó Prometheus para un manejo de métricas y monitoreo más sencillo y 100% auto-contenido localmente, a diferencia de Datadog que requeriría cuentas externas, agentes pesados y API Keys pagas. |

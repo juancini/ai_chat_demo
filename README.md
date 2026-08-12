@@ -91,21 +91,29 @@ El backend integra recolectores de **Prometheus** (`prometheus_client`) para mon
   * `OpenRouterLLMService`: Utiliza `httpx` asíncrono para enviar requests a la API compatible con OpenAI de OpenRouter.
   * `MockLLMService`: Fallback inteligente cuando no hay `OPENROUTER_API_KEY` configurada.
 * **Persistencia Asíncrona con MongoDB (`Motor`)**: Utilización de drivers 100% asíncronos para evitar bloquear el Event Loop de FastAPI y garantizar alto throughput bajo concurrencia.
-* **Indexación en BD**: Índice compuesto en MongoDB `{ conversation_id: 1, timestamp: 1 }` para acelerar la recuperación cronológica del historial de mensajes.
-* **Interfaz de usuario fluida (HTML5 + CSS Glassmorphic + JS)**: Interfaz minimalista pero cuidada, servida directamente por FastAPI sin requerir servidores web auxiliares.
+* **Indexación Compuesta en MongoDB (Detalle Crucial de Escalabilidad)**:
+  * `db.messages.create_index([("conversation_id", 1), ("timestamp", 1)])`
+  * **Por qué existe**: A medida que la cantidad de mensajes crece en la base de datos, consultar el historial (`.find({"conversation_id": conv_id}).sort("timestamp", 1)`) sin un índice compuesto obligaría a MongoDB a realizar un escaneo completo de colección ($O(N)$) y una costosa etapa de ordenamiento en memoria. El índice compuesto garantiza lecturas B-Tree instantáneas en $O(\log N)$ ordenadas cronológicamente.
+* **Backend 100% Stateless (Escalabilidad Horizontal)**:
+  * No se almacena estado de chat o sesión en memoria de FastAPI. Toda la información conversacional se recupera y persiste dinámicamente en MongoDB.
+  * **Beneficio**: Permite escalar horizontalmente el backend (`docker compose up --scale backend=3`) detrás de un balanceador de carga sin romper las sesiones de los usuarios ni requerir *sticky sessions*.
+* **Streaming de Respuestas vía Server-Sent Events (SSE)**:
+  * Implementación con FastAPI `StreamingResponse` y `text/event-stream` para enviar tokens en tiempo real al frontend a medida que son entregados por OpenRouter (o Mock). Esto reduce drásticamente el *Time To First Token* (TTFT) y mejora la velocidad percibida por el usuario.
+* **Métricas Prometheus Integradas**: Métricas de consumo de tokens, contadores de chats/mensajes y latencia expuestos en `/metrics` y monitoreados en tiempo real por el contenedor de Prometheus (`http://localhost:9090`).
+* **Interfaz de usuario fluida (HTML5 + CSS Glassmorphic + JS)**: Interfaz minimalista pero cuidada con soporte para Markdown (código, tablas, formato), servida directamente por FastAPI sin requerir servidores web auxiliares.
 
 ### 2. ¿Qué dejé afuera a propósito? (y por qué)
 * **Contenedor Nginx independiente**: 
-  * *Razón*: El enunciado busca mantener el stack simple y funcional. Servir los archivos estáticos desde FastAPI mediante `fastapi.staticfiles.StaticFiles` reduce la complejidad de `docker-compose.yml` a solo 2 contenedores (`backend` + `mongodb`) sin degradar la experiencia de usuario.
+  * *Razón*: El enunciado busca mantener el stack simple y funcional. Servir los archivos estáticos desde FastAPI mediante `fastapi.staticfiles.StaticFiles` reduce la complejidad del proyecto sin degradar la experiencia de usuario.
 * **Sistema de Autenticación de Usuarios (JWT / OAuth2)**:
   * *Razón*: Para un Code Challenge, agregar autenticación añade fricción innecesaria al evaluador para probar la app. La app está centrada en la interacción conversacional y persistencia.
 * **RAG / Vector Databases (ChromaDB / Pinecone)**:
   * *Razón*: Priorizamos el principio [KISS](https://en.wikipedia.org/wiki/KISS_principle) :"Preferimos algo chico, prolijo y bien pensado antes que algo grande y a medio terminar".
 
 ### 3. ¿Qué habría hecho distinto con más tiempo?
-* **Streaming de respuestas vía Server-Sent Events (SSE) o WebSockets**: En lugar de esperar el bloque completo del LLM, enviar tokens en tiempo real al frontend para mejorar la percepción de velocidad.
 * **Búsqueda Full-Text sobre mensajes**: Implementar índices de texto en MongoDB para buscar términos clave dentro del historial de conversaciones.
 * **Batería de tests con Testcontainers**: Usar un contenedor real de MongoDB efímero durante los tests de integración en lugar de mocks.
+
 
 ---
 
