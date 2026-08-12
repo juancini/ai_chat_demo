@@ -1,7 +1,7 @@
 import json
 import logging
 from collections.abc import AsyncGenerator
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from bson import ObjectId
@@ -61,8 +61,8 @@ class ChatService:
                 ConversationSchema(
                     id=conv_id,
                     title=doc.get("title", "Untitled Conversation"),
-                    created_at=doc.get("created_at", datetime.utcnow()),
-                    updated_at=doc.get("updated_at", datetime.utcnow()),
+                    created_at=doc.get("created_at", datetime.now(UTC)),
+                    updated_at=doc.get("updated_at", datetime.now(UTC)),
                     message_count=msg_count,
                 )
             )
@@ -72,7 +72,7 @@ class ChatService:
         self, title: str | None = None, initial_message: str | None = None
     ) -> tuple[ConversationDetailSchema, ChatResponseSchema | None]:
         """Create a new conversation thread."""
-        now = datetime.utcnow()
+        now = datetime.now(UTC)
         default_title = title.strip() if title and title.strip() else "New Conversation"
 
         conv_doc = {
@@ -136,8 +136,8 @@ class ChatService:
         return ConversationDetailSchema(
             id=conv_id,
             title=conv_doc.get("title", "Untitled Conversation"),
-            created_at=conv_doc.get("created_at", datetime.utcnow()),
-            updated_at=conv_doc.get("updated_at", datetime.utcnow()),
+            created_at=conv_doc.get("created_at", datetime.now(UTC)),
+            updated_at=conv_doc.get("updated_at", datetime.now(UTC)),
             message_count=len(messages),
             messages=messages,
         )
@@ -157,7 +157,7 @@ class ChatService:
                 detail=f"Conversation '{conv_id}' not found.",
             )
 
-        now = datetime.utcnow()
+        now = datetime.now(UTC)
 
         user_msg_doc = {
             "conversation_id": conv_id,
@@ -200,7 +200,7 @@ class ChatService:
                 detail=f"LLM Service Error: {str(e)}",
             )
 
-        asst_now = datetime.utcnow()
+        asst_now = datetime.now(UTC)
         asst_msg_doc = {
             "conversation_id": conv_id,
             "role": Role.ASSISTANT.value,
@@ -245,7 +245,7 @@ class ChatService:
             yield f"data: {json.dumps({'error': f'Conversation {conv_id} not found'})}\n\n"
             return
 
-        now = datetime.utcnow()
+        now = datetime.now(UTC)
 
         user_msg_doc = {
             "conversation_id": conv_id,
@@ -278,7 +278,7 @@ class ChatService:
 
         full_response = "".join(accumulated_content)
 
-        asst_now = datetime.utcnow()
+        asst_now = datetime.now(UTC)
         asst_msg_doc = {
             "conversation_id": conv_id,
             "role": Role.ASSISTANT.value,

@@ -274,6 +274,18 @@ document.addEventListener('DOMContentLoaded', () => {
                 hideTypingIndicator();
                 if (data.title) {
                   activeChatTitleEl.textContent = data.title;
+                } else {
+                  try {
+                    const detailRes = await fetch(`/api/v1/conversations/${currentConversationId}`);
+                    if (detailRes.ok) {
+                      const detail = await detailRes.json();
+                      if (detail.title) {
+                        activeChatTitleEl.textContent = detail.title;
+                      }
+                    }
+                  } catch (refreshErr) {
+                    console.warn('Could not refresh conversation title:', refreshErr);
+                  }
                 }
                 await loadConversations();
               }

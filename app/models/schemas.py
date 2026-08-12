@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import StrEnum
 
 from pydantic import BaseModel, Field
@@ -16,7 +16,7 @@ class MessageSchema(BaseModel):
     role: Role = Field(..., description="Role of message sender")
     content: str = Field(..., description="Message text content")
     timestamp: datetime = Field(
-        default_factory=datetime.utcnow, description="Creation timestamp"
+        default_factory=lambda: datetime.now(UTC), description="Creation timestamp"
     )
 
 
