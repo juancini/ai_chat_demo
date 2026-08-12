@@ -3,7 +3,7 @@
 ## 1. Visión General del Sistema
 El objetivo de este proyecto es construir un servicio de Chatbot conversacional robusto, escalable, mantenible y de fácil despliegue, cumpliendo con los requerimientos del Code Challenge.
 
-El sistema permite a los usuarios iniciar conversaciones, enviar mensajes a un Modelo de Lenguaje (LLM) y mantener el historial conversacional persistido de forma segura en MongoDB.
+El sistema permite a los usuarios iniciar conversaciones, enviar mensajes a un Modelo de Lenguaje (LLM), mantener el historial conversacional persistido en MongoDB y recolectar métricas en tiempo real a través de Prometheus.
 
 ---
 
@@ -22,16 +22,16 @@ El sistema permite a los usuarios iniciar conversaciones, enviar mensajes a un M
 |                                                                       |
 |  +-------------------+   +--------------------+   +----------------+  |
 |  |  Static File App  |   |  REST API Routers  |   | Middleware &   |  |
-|  | (Serves UI / Web) |   | (/api/v1/chat,...) |   | Error Handling |  |
+|  | (Serves UI / Web) |   | (/api/v1/chat,...) |   | Prometheus     |  |
 |  +-------------------+   +--------------------+   +----------------+  |
-|                                    |                                  |
-|                         +----------------------+                      |
-|                         |  LLM Service Layer   |                      |
-|                         | (Strategy Pattern)   |                      |
-|                         +----------------------+                      |
-|                               /          \                            |
-|             (API Key Valid)  /            \ (No API Key)              |
-|                             v              v                          |
+|                                    |                       |          |
+|                         +----------------------+           |          |
+|                         |  LLM Service Layer   |           v          |
+|                         | (Strategy Pattern)   |       /metrics       |
+|                         +----------------------+           |          |
+|                               /          \                 |          |
+|             (API Key Valid)  /            \ (No API Key)   |          |
+|                             v              v               |          |
 |                  +--------------------+  +--------------------+       |
 |                  | OpenRouter Service |  |  Mock LLM Service  |       |
 |                  | (OpenAI Compatible)|  | (Fallback / Demo)  |       |
@@ -42,13 +42,13 @@ El sistema permite a los usuarios iniciar conversaciones, enviar mensajes a un M
 |                         |  (Motor Async Client)|                      |
 |                         +----------------------+                      |
 +------------------------------------|----------------------------------+
-                                     |
-                               Async Driver
-                                     v
-+-----------------------------------------------------------------------+
-|                          MongoDB Database                             |
-|            (Colecciones: conversations, messages)                    |
-+-----------------------------------------------------------------------+
+                                     |                       ^
+                               Async Driver                  |
+                                     v                   Scrape (15s)
++----------------------------------------+       +----------------------+
+|            MongoDB Database            |       |  Prometheus Server   |
+| (Colecciones: conversations, messages) |       | (Metrics Collection) |
++----------------------------------------+       +----------------------+
 ```
 
 ---
@@ -65,7 +65,7 @@ El sistema permite a los usuarios iniciar conversaciones, enviar mensajes a un M
 * **Runtime:** Python 3.12 (o 3.13-slim).
 * **Framework:** FastAPI con Pydantic V2 para validación estricta de esquemas Request/Response.
 * **Capas de Dominio:**
-  * **Routers / Endpoints:** Manejo de rutas REST (`/api/v1/conversations`, `/api/v1/chat`).
+  * **Routers / Endpoints:** Manejo de rutas REST (`/api/v1/conversations`, `/api/v1/chat`, `/metrics`).
   * **Service Layer:** Aislamiento de lógica de negocio y comunicación con servicios externos/LLM.
   * **Repositories / DAOs:** Gestión de consultas a la base de datos a través del driver asíncrono.
 
@@ -78,6 +78,14 @@ El sistema permite a los usuarios iniciar conversaciones, enviar mensajes a un M
 ### 3.4. Persistencia (MongoDB)
 * **Driver:** `Motor` (Driver oficial asíncrono de MongoDB para Python) o `Beanie` (ODM asíncrono sobre Pydantic).
 * **Garantía:** Conexiones no bloqueantes que preservan el Event Loop de FastAPI.
+
+### 3.5. Observabilidad y Métricas (Prometheus)
+* **Biblioteca:** `prometheus_client`.
+* **Endpoint de Scraping:** GET `/metrics` en formato OpenMetrics/Prometheus.
+* **Métricas Recolectadas:**
+  * **Uso de Tokens**: `chat_llm_prompt_tokens_total`, `chat_llm_completion_tokens_total`, `chat_llm_tokens_total` (etiquetados por `provider` y `model`).
+  * **Actividad Conversacional**: `chat_conversations_created_total`, `chat_conversations_deleted_total`, `chat_messages_total` (etiquetado por `role`).
+  * **Latencia & Rendimiento**: `chat_llm_request_duration_seconds`, `chat_llm_time_to_first_token_seconds` (TTFT para respuestas streaming), `chat_http_request_duration_seconds`.
 
 ---
 
@@ -117,6 +125,7 @@ Representa un mensaje individual dentro de una conversación.
 | **Driver de Mongo** | Motor (Async) | PyMongo (Sync) | PyMongo bloquea el Event Loop de FastAPI, degradando drásticamente el throughput. |
 | **Servido de Frontend** | Servido por FastAPI | Contenedor Nginx independiente | Reduce la complejidad de `docker-compose.yml` de 3 a 2 contenedores sin perder funcionalidad. |
 | **Resiliencia API Key** | Strategy Pattern (Mock LLM) | Lanza excepción en startup | Garantiza que `docker compose up` funcione *out-of-the-box* sin credenciales obligatorias. |
+| **Métricas y Observabilidad** | Prometheus + `prometheus_client` (`/metrics`) | APM SaaS (ej: Datadog, New Relic) | Se agregó Prometheus para un manejo de métricas y monitoreo más sencillo y 100% auto-contenido localmente, a diferencia de Datadog que requeriría cuentas externas, agentes pesados y API Keys pagas. |
 | **Health-check endpoint** | `db.command("ping")` en `/system/status` | No hay verificación de DB en el estado de salud | Permite exponer un estado de servicio fiable y devolver `503` cuando MongoDB no está disponible. |
 | **CI / CD & SCA** | GitHub Actions + Ruff + Pytest | Ejecución manual local | GitHub Actions ofrece ejecuciones gratuitas ilimitadas para repos públicos. Mantiene altos estándares de calidad. |
 
@@ -132,18 +141,20 @@ Representa un mensaje individual dentro de una conversación.
 ├── app/
 │   ├── api/                # Endpoints y controladores REST
 │   │   └── v1/
-│   ├── core/               # Configuración (Pydantic Settings), logging
+│   ├── core/               # Configuración, logging, métricas Prometheus
+│   │   └── metrics.py      # Definición de contadores e histogramas
 │   ├── db/                 # Conexión a Mongo (Motor client & events)
 │   ├── models/             # Esquemas Pydantic y modelos de BD
 │   ├── services/           # Lógica de LLM (OpenRouter & Mock Provider)
 │   ├── static/             # Archivos estáticos del Frontend (HTML, CSS, JS)
-│   └── main.py             # Entrada principal de FastAPI
+│   └── main.py             # Entrada principal de FastAPI + middleware métricas
 ├── tests/                  # Tests unitarios e integración (Pytest)
 ├── .env.example            # Plantilla de variables de entorno
+├── prometheus.yml          # Configuración de scraping para Prometheus
 ├── DESIGN.md               # Documento de diseño arquitectónico
 ├── README.md               # Instrucciones de uso, setup y decisiones
 ├── Dockerfile              # Construcción optimizada del backend
-├── docker-compose.yml      # Orchestration de Backend + MongoDB
+├── docker-compose.yml      # Orchestration de Backend + MongoDB + Prometheus
 ├── pyproject.toml          # Configuración de dependencias, Ruff y Pytest
 └── requirements.txt
 ```

@@ -43,6 +43,29 @@ Abre tu navegador e ingresa a:
 
 * **Documentación interactiva de la API (Swagger UI)**: [http://localhost:8000/docs](http://localhost:8000/docs)
 * **ReDoc**: [http://localhost:8000/redoc](http://localhost:8000/redoc)
+* **Métricas en formato OpenMetrics/Prometheus**: [http://localhost:8000/metrics](http://localhost:8000/metrics)
+* **Servidor y Dashboard de Prometheus**: [http://localhost:9090](http://localhost:9090)
+
+---
+
+## 📊 Métricas y Observabilidad (Prometheus)
+
+El backend integra recolectores de **Prometheus** (`prometheus_client`) para monitorear el consumo de recursos, rendimiento y uso del chatbot:
+
+* **Consumo de Tokens**:
+  * `chat_llm_prompt_tokens_total`: Total de tokens de prompt (input) enviados al LLM.
+  * `chat_llm_completion_tokens_total`: Total de tokens de respuesta (output) generados por el LLM.
+  * `chat_llm_tokens_total`: Total combinado de tokens consumidos (desglosado por `provider` y `model`).
+* **Métricas de Conversaciones y Mensajes**:
+  * `chat_conversations_created_total`: Cantidad total de chats creados.
+  * `chat_conversations_deleted_total`: Cantidad total de chats eliminados.
+  * `chat_messages_total`: Mensajes procesados (etiquetados por `role`: `user` vs `assistant`).
+* **Métricas de Latencia y Rendimiento**:
+  * `chat_llm_request_duration_seconds`: Histograma de tiempo de respuesta del LLM.
+  * `chat_llm_time_to_first_token_seconds`: Latencia hasta el primer token en respuestas streaming (TTFT).
+  * `chat_http_request_duration_seconds`: Histograma de latencia de solicitudes HTTP.
+
+> 💡 **Prometheus vs Datadog**: Elegimos incluir Prometheus y exponer `/metrics` para un manejo de métricas y monitoreo local auto-contenido, simple y sin costo. A diferencia de APM SaaS como Datadog, no requiere credenciales externas, agentes pesados ni configuraciones complejas para probar en un clone limpio.
 
 ---
 
@@ -55,6 +78,8 @@ Abre tu navegador e ingresa a:
    docker compose restart
    ```
 4. Recarga la página web: **Tus conversaciones y mensajes continuarán intactos**, gracias al volumen de persistencia configurado en MongoDB (`mongodb_data`).
+5. Abre [http://localhost:9090](http://localhost:9090) para explorar las métricas recolectadas por Prometheus.
+
 
 ---
 

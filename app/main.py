@@ -1,13 +1,16 @@
 import logging
 import os
+import time
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, status
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
 from app.api.v1.router import api_router
 from app.core.config import settings
+from app.core.metrics import HTTP_REQUEST_DURATION_SECONDS
 from app.db.mongodb import close_mongo_connection, connect_to_mongo
 from app.services.llm_service import LLMServiceError
 
@@ -35,6 +38,23 @@ app = FastAPI(
     docs_url="/docs",
     redoc_url="/redoc",
 )
+
+
+@app.middleware("http")
+async def record_request_metrics(request: Request, call_next):
+    """Middleware measuring request processing duration for Prometheus."""
+    start_time = time.perf_counter()
+    response = await call_next(request)
+    duration = time.perf_counter() - start_time
+    endpoint = request.url.path
+    HTTP_REQUEST_DURATION_SECONDS.labels(method=request.method, endpoint=endpoint).observe(duration)
+    return response
+
+
+@app.get("/metrics")
+async def get_prometheus_metrics():
+    """Expose Prometheus metrics endpoint."""
+    return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
 @app.exception_handler(LLMServiceError)

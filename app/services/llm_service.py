@@ -2,17 +2,24 @@ import abc
 import asyncio
 import json
 import logging
+import time
 from collections.abc import AsyncGenerator
 
 import httpx
 
 from app.core.config import settings
+from app.core.metrics import (
+    LLM_REQUEST_DURATION_SECONDS,
+    LLM_TIME_TO_FIRST_TOKEN_SECONDS,
+    record_tokens,
+)
 
 logger = logging.getLogger(__name__)
 
 
 class LLMServiceError(Exception):
     """Exception raised when an LLM provider fails."""
+
     pass
 
 
@@ -64,6 +71,7 @@ class OpenRouterLLMService(BaseLLMService):
             "max_tokens": 1000,
         }
 
+        start_time = time.perf_counter()
         try:
             async with httpx.AsyncClient(timeout=settings.HTTP_TIMEOUT_SECONDS) as client:
                 response = await client.post(url, headers=headers, json=payload)
@@ -88,14 +96,43 @@ class OpenRouterLLMService(BaseLLMService):
 
                 content = choices[0].get("message", {}).get("content", "").strip()
                 model_used = data.get("model", self.model)
+
+                usage = data.get("usage", {})
+                prompt_tokens = usage.get("prompt_tokens") or max(
+                    1, sum(len(m.get("content", "")) for m in messages) // 4
+                )
+                completion_tokens = usage.get("completion_tokens") or max(1, len(content) // 4)
+
+                record_tokens(
+                    provider="openrouter",
+                    model=model_used,
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
+                )
+
+                duration = time.perf_counter() - start_time
+                LLM_REQUEST_DURATION_SECONDS.labels(
+                    provider="openrouter", status="success"
+                ).observe(duration)
+
                 return content, "openrouter", model_used
 
         except httpx.TimeoutException as e:
+            duration = time.perf_counter() - start_time
+            LLM_REQUEST_DURATION_SECONDS.labels(provider="openrouter", status="timeout").observe(
+                duration
+            )
             logger.error("OpenRouter API request timed out: %s", e)
             raise LLMServiceError("OpenRouter API request timed out. Please try again.") from e
-        except httpx.RequestError as e:
-            logger.error("Network error communicating with OpenRouter: %s", e)
-            raise LLMServiceError(f"Network error connecting to OpenRouter: {e}") from e
+        except Exception as e:
+            duration = time.perf_counter() - start_time
+            LLM_REQUEST_DURATION_SECONDS.labels(provider="openrouter", status="error").observe(
+                duration
+            )
+            if not isinstance(e, LLMServiceError):
+                logger.error("Network error communicating with OpenRouter: %s", e)
+                raise LLMServiceError(f"Network error connecting to OpenRouter: {e}") from e
+            raise
 
     async def generate_response_stream(
         self, messages: list[dict[str, str]]
@@ -114,6 +151,10 @@ class OpenRouterLLMService(BaseLLMService):
             "max_tokens": 1000,
             "stream": True,
         }
+
+        start_time = time.perf_counter()
+        first_token_recorded = False
+        accumulated_text = []
 
         try:
             async with httpx.AsyncClient(timeout=settings.HTTP_TIMEOUT_SECONDS) as client:
@@ -141,13 +182,38 @@ class OpenRouterLLMService(BaseLLMService):
                                 delta = data.get("choices", [{}])[0].get("delta", {})
                                 content_chunk = delta.get("content", "")
                                 if content_chunk:
+                                    if not first_token_recorded:
+                                        ttft = time.perf_counter() - start_time
+                                        LLM_TIME_TO_FIRST_TOKEN_SECONDS.labels(
+                                            provider="openrouter"
+                                        ).observe(ttft)
+                                        first_token_recorded = True
+
+                                    accumulated_text.append(content_chunk)
                                     yield content_chunk
                             except json.JSONDecodeError:
                                 continue
-        except httpx.TimeoutException as e:
-            raise LLMServiceError("OpenRouter streaming timed out.") from e
-        except httpx.RequestError as e:
-            raise LLMServiceError(f"Network error during OpenRouter stream: {e}") from e
+
+            full_content = "".join(accumulated_text)
+            prompt_tokens = max(1, sum(len(m.get("content", "")) for m in messages) // 4)
+            completion_tokens = max(1, len(full_content) // 4)
+            record_tokens("openrouter", self.model, prompt_tokens, completion_tokens)
+
+            duration = time.perf_counter() - start_time
+            LLM_REQUEST_DURATION_SECONDS.labels(
+                provider="openrouter", status="success"
+            ).observe(duration)
+
+        except Exception as e:
+            duration = time.perf_counter() - start_time
+            LLM_REQUEST_DURATION_SECONDS.labels(provider="openrouter", status="error").observe(
+                duration
+            )
+            if isinstance(e, httpx.TimeoutException):
+                raise LLMServiceError("OpenRouter streaming timed out.") from e
+            if isinstance(e, httpx.RequestError):
+                raise LLMServiceError(f"Network error during OpenRouter stream: {e}") from e
+            raise
 
     async def generate_title(self, prompt: str) -> str:
         messages = [
@@ -178,6 +244,7 @@ class MockLLMService(BaseLLMService):
     async def generate_response(
         self, messages: list[dict[str, str]]
     ) -> tuple[str, str, str]:
+        start_time = time.perf_counter()
         last_user_msg = ""
         for m in reversed(messages):
             if m.get("role") == "user":
@@ -186,23 +253,36 @@ class MockLLMService(BaseLLMService):
 
         response_content = (
             f"[🤖 MOCK MODE ACTIVE]\n\n"
-            f"I received your message: \"{last_user_msg}\"\n\n"
+            f'I received your message: "{last_user_msg}"\n\n'
             f"ℹ️ *Note: `OPENROUTER_API_KEY` is not set in environment settings.\n"
             f"The application is running in Mock LLM mode so you can test all features "
             f"(creation, persistence, history) out-of-the-box without crashing!\n"
             f"Set a valid OPENROUTER_API_KEY in your .env file to enable live AI responses.*"
         )
+
+        prompt_tokens = max(1, sum(len(m.get("content", "")) for m in messages) // 4)
+        completion_tokens = max(1, len(response_content) // 4)
+        record_tokens("mock", self.model, prompt_tokens, completion_tokens)
+
+        duration = time.perf_counter() - start_time
+        LLM_REQUEST_DURATION_SECONDS.labels(provider="mock", status="success").observe(duration)
+
         return response_content, "mock", self.model
 
     async def generate_response_stream(
         self, messages: list[dict[str, str]]
     ) -> AsyncGenerator[str, None]:
+        start_time = time.perf_counter()
         full_content, _, _ = await self.generate_response(messages)
+
+        ttft = time.perf_counter() - start_time
+        LLM_TIME_TO_FIRST_TOKEN_SECONDS.labels(provider="mock").observe(ttft)
+
         words = full_content.split(" ")
         for i, word in enumerate(words):
             chunk = word + (" " if i < len(words) - 1 else "")
             yield chunk
-            await asyncio.sleep(0.03)
+            await asyncio.sleep(0.02)
 
     async def generate_title(self, prompt: str) -> str:
         clean_prompt = prompt.strip()
@@ -226,3 +306,4 @@ def get_llm_service() -> BaseLLMService:
 
     logger.info("No OPENROUTER_API_KEY configured. Falling back to MockLLMService.")
     return MockLLMService()
+

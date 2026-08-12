@@ -35,6 +35,21 @@ services:
       mongodb:
         condition: service_healthy
 
+  prometheus:
+    image: prom/prometheus:v2.51.0
+    container_name: ai_chat_prometheus
+    restart: always
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    depends_on:
+      - backend
+
 volumes:
   mongodb_data:
     driver: local
+  prometheus_data:
+    driver: local
+

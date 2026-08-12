@@ -58,3 +58,13 @@ async def test_send_message_updates_title_for_default_or_blank_titles(mock_mongo
     llm_service.generate_title.assert_awaited_once_with("Hello there")
     update_payload = conv_col.update_one.await_args.args[1]["$set"]
     assert update_payload["title"] == "Helpful Summary"
+
+
+@pytest.mark.asyncio
+async def test_prometheus_metrics_endpoint(async_client):
+    response = await async_client.get("/metrics")
+    assert response.status_code == 200
+    assert "chat_llm_prompt_tokens_total" in response.text
+    assert "chat_conversations_created_total" in response.text
+    assert "chat_http_request_duration_seconds" in response.text
+

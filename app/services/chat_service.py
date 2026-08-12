@@ -8,6 +8,11 @@ from bson import ObjectId
 from fastapi import HTTPException, status
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
+from app.core.metrics import (
+    record_conversation_created,
+    record_conversation_deleted,
+    record_message,
+)
 from app.models.schemas import (
     ChatResponseSchema,
     ConversationDetailSchema,
@@ -82,6 +87,7 @@ class ChatService:
         }
         result = await self.conversations_col.insert_one(conv_doc)
         conv_id = str(result.inserted_id)
+        record_conversation_created()
 
         chat_response = None
         messages = []
@@ -167,6 +173,7 @@ class ChatService:
         }
         user_msg_res = await self.messages_col.insert_one(user_msg_doc)
         user_msg_id = str(user_msg_res.inserted_id)
+        record_message("user")
 
         user_message_schema = MessageSchema(
             id=user_msg_id,
@@ -209,6 +216,7 @@ class ChatService:
         }
         asst_msg_res = await self.messages_col.insert_one(asst_msg_doc)
         asst_msg_id = str(asst_msg_res.inserted_id)
+        record_message("assistant")
 
         assistant_message_schema = MessageSchema(
             id=asst_msg_id,
@@ -254,6 +262,7 @@ class ChatService:
             "timestamp": now,
         }
         await self.messages_col.insert_one(user_msg_doc)
+        record_message("user")
 
         cursor = self.messages_col.find({"conversation_id": conv_id}).sort("timestamp", 1)
         history_docs = await cursor.to_list(length=100)
@@ -287,6 +296,7 @@ class ChatService:
         }
         asst_res = await self.messages_col.insert_one(asst_msg_doc)
         asst_id = str(asst_res.inserted_id)
+        record_message("assistant")
 
         update_fields: dict[str, Any] = {"updated_at": asst_now, **title_update_fields}
         if update_fields:
@@ -319,4 +329,5 @@ class ChatService:
             )
 
         await self.messages_col.delete_many({"conversation_id": conv_id})
+        record_conversation_deleted()
         return True
